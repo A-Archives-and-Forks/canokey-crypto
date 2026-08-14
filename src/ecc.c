@@ -340,7 +340,12 @@ int ecdh(key_type_t type, const uint8_t *priv_key, const uint8_t *receiver_pub_k
     swap_big_number_endian(pub);
     K__x25519(out, priv_key, pub);
     swap_big_number_endian(out);
-    return 0;
+
+    uint8_t nonzero = 0;
+    for (size_t i = 0; i < sizeof(K__x25519_key); ++i) nonzero |= out[i];
+
+    // RFC 7748 permits rejecting the all-zero result to detect low-order public inputs.
+    return nonzero == 0 ? -1 : 0;
   }
 }
 

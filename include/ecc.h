@@ -91,7 +91,7 @@ int sm2_z(const uint8_t *id, const ecc_key_t *key, uint8_t *z);
  * @param receiver_pub_key  The receiver's public key P
  * @param out               s*P
  *
- * @return 0: Success, -1: Error
+ * @return 0: Success, -1: Error or an all-zero X25519 shared secret
  */
 int ecdh(key_type_t type, const uint8_t *priv_key, const uint8_t *receiver_pub_key, uint8_t *out);
 

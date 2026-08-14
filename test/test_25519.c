@@ -2,6 +2,7 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "ecc.h"
 #include "sha.h"
@@ -145,6 +146,44 @@ static void test_cv25519_decrypt(void **state) {
   }
 }
 
+static void test_x25519_ecdh(void **state) {
+  (void)state;
+  // RFC 7748 section 6.1, represented in the endianness used by ecdh().
+  uint8_t receiver_public[] = {
+      0x85, 0x20, 0xf0, 0x09, 0x89, 0x30, 0xa7, 0x54, 0x74, 0x8b, 0x7d,
+      0xdc, 0xb4, 0x3e, 0xf7, 0x5a, 0x0d, 0xbf, 0x3a, 0x0d, 0x26, 0x38,
+      0x1a, 0xf4, 0xeb, 0xa4, 0xa9, 0x8e, 0xaa, 0x9b, 0x4e, 0x6a,
+  };
+  uint8_t private_key[] = {0xeb, 0xe0, 0x88, 0xff, 0x27, 0x8b, 0x2f, 0x1c,
+                           0xfd, 0xb6, 0x18, 0x26, 0x29, 0xb1, 0x3b, 0x6f,
+                           0xe6, 0x0e, 0x80, 0x83, 0x8b, 0x7f, 0xe1, 0x79,
+                           0x4b, 0x8a, 0x4a, 0x62, 0x7e, 0x08, 0xab, 0x5d};
+  uint8_t expected[] = {0x4a, 0x5d, 0x9d, 0x5b, 0xa4, 0xce, 0x2d, 0xe1,
+                        0x72, 0x8e, 0x3b, 0xf4, 0x80, 0x35, 0x0f, 0x25,
+                        0xe0, 0x7e, 0x21, 0xc9, 0x47, 0xd1, 0x9e, 0x33,
+                        0x76, 0xf0, 0x9b, 0x3c, 0x1e, 0x16, 0x17, 0x42};
+  uint8_t out[32];
+
+  x25519_key_from_random(private_key);
+  assert_int_equal(ecdh(X25519, private_key, receiver_public, out), 0);
+  assert_memory_equal(out, expected, sizeof(expected));
+}
+
+static void test_x25519_ecdh_rejects_all_zero_result(void **state) {
+  (void)state;
+  uint8_t private_key[32] = {0};
+  uint8_t low_order_public[32] = {0};
+  uint8_t out[32];
+  uint8_t zero[32] = {0};
+
+  private_key[0] = 0x40;
+  private_key[31] = 0x08;
+  memset(out, 0xa5, sizeof(out));
+
+  assert_int_equal(ecdh(X25519, private_key, low_order_public, out), -1);
+  assert_memory_equal(out, zero, sizeof(zero));
+}
+
 int main() {
   const struct CMUnitTest tests[] = {
       cmocka_unit_test(test_ed25519_public),
@@ -152,6 +191,8 @@ int main() {
       cmocka_unit_test(test_ed25519_sign),
       cmocka_unit_test(test_ed25519_sign2),
       cmocka_unit_test(test_cv25519_decrypt),
+      cmocka_unit_test(test_x25519_ecdh),
+      cmocka_unit_test(test_x25519_ecdh_rejects_all_zero_result),
   };
 
   return cmocka_run_group_tests(tests, NULL, NULL);
