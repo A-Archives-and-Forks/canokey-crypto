@@ -124,11 +124,13 @@ typedef struct {
  *
  * phase 0 (first call):
  *   Runs the full signing algorithm (passes 1-3).
- *   Outputs c_tilde (48 bytes) to out.
+ *   Outputs c_tilde (48 bytes) to out. A platform backend may append one or
+ *   more leading packed z polynomials when out_size has enough space, and
+ *   advances phase past those polynomials.
  *   Saves intermediate state for subsequent calls.
  *   msg, ctx, tr must be valid.
  *
- * phase 1..L (subsequent calls):
+ * phase 1..L (subsequent calls, except z rows coalesced into phase 0):
  *   Recomputes z[j] from state and outputs one full packed z polynomial
  *   (MLDSA_POLYZ_PACKEDBYTES = 640 bytes) per call.
  *
