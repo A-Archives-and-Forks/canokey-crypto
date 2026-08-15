@@ -7,6 +7,13 @@
 #include <aes.h>
 #include <block-cipher.h>
 
+static int aes128_enc_calls;
+
+static int counting_aes128_enc(const uint8_t *in, uint8_t *out, const uint8_t *key) {
+  aes128_enc_calls++;
+  return aes128_enc(in, out, key);
+}
+
 static void test_aes_ecb(void **state) {
   (void)state;
 
@@ -67,9 +74,11 @@ static void test_aes_cbc(void **state) {
                              .key = key,
                              .iv = iv,
                              .block_size = 16,
-                             .encrypt = aes128_enc,
+                             .encrypt = counting_aes128_enc,
                              .decrypt = aes128_dec};
+  aes128_enc_calls = 0;
   block_cipher_enc(&cfg);
+  assert_int_equal(aes128_enc_calls, 3);
   for (int i = 0; i != 48; ++i) {
     assert_int_equal(data[i], expected[i]);
   }

@@ -28,8 +28,7 @@ int block_cipher_enc(block_cipher_config *cfg) {
       xor_buf(iv_buf, buf_in, cfg->block_size);
       ret = cfg->encrypt(buf_in, cfg->out + idx * cfg->block_size, cfg->key);
       if (ret < 0) break;
-      ret = cfg->encrypt(buf_in, iv_buf, cfg->key);
-      memcpy(cfg->out + idx * cfg->block_size, iv_buf, cfg->block_size);
+      memcpy(iv_buf, cfg->out + idx * cfg->block_size, cfg->block_size);
       break;
     case CFB:
       ret = cfg->encrypt(iv_buf, iv_buf, cfg->key);
