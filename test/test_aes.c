@@ -7,13 +7,6 @@
 #include <aes.h>
 #include <block-cipher.h>
 
-static int aes128_enc_calls;
-
-static int counting_aes128_enc(const uint8_t *in, uint8_t *out, const uint8_t *key) {
-  aes128_enc_calls++;
-  return aes128_enc(in, out, key);
-}
-
 static void test_aes_ecb(void **state) {
   (void)state;
 
@@ -28,21 +21,12 @@ static void test_aes_ecb(void **state) {
                         0x0a, 0x94, 0x0b, 0xb5, 0x41, 0x6e, 0xf0, 0x45,
                         0xf1, 0xc3, 0x94, 0x58, 0xc6, 0x53, 0xea, 0x5a};
 
-  block_cipher_config cfg = {.mode = ECB,
-                             .in = data,
-                             .in_size = sizeof(data),
-                             .out = data,
-                             .key = key,
-                             .iv = NULL,
-                             .block_size = 16,
-                             .encrypt = aes128_enc,
-                             .decrypt = aes128_dec};
-  block_cipher_enc(&cfg);
+  assert_int_equal(aes_crypt(AES_MODE_ECB, AES_OP_ENCRYPT, AES_KEY_128, key, NULL, data, data, sizeof(data)), 0);
   for (int i = 0; i != 32; ++i) {
     assert_int_equal(data[i], expected[i]);
   }
 
-  block_cipher_dec(&cfg);
+  assert_int_equal(aes_crypt(AES_MODE_ECB, AES_OP_DECRYPT, AES_KEY_128, key, NULL, data, data, sizeof(data)), 0);
   for (int i = 0; i != 16; ++i) {
     assert_int_equal(data[i], i);
     assert_int_equal(data[i + 16], i);
@@ -67,27 +51,55 @@ static void test_aes_cbc(void **state) {
       0x38, 0x80, 0xb8, 0x32, 0xd2, 0x0a, 0x79, 0x76, 0xf4, 0xfb, 0xca, 0x63,
       0x59, 0xe4, 0x72, 0x42, 0x45, 0xfe, 0xc3, 0x70, 0xbb, 0x63, 0x7d, 0x38};
 
-  block_cipher_config cfg = {.mode = CBC,
-                             .in = data,
-                             .in_size = sizeof(data),
-                             .out = data,
-                             .key = key,
-                             .iv = iv,
-                             .block_size = 16,
-                             .encrypt = counting_aes128_enc,
-                             .decrypt = aes128_dec};
-  aes128_enc_calls = 0;
-  block_cipher_enc(&cfg);
-  assert_int_equal(aes128_enc_calls, 3);
+  assert_int_equal(aes_crypt(AES_MODE_CBC, AES_OP_ENCRYPT, AES_KEY_128, key, iv, data, data, sizeof(data)), 0);
   for (int i = 0; i != 48; ++i) {
     assert_int_equal(data[i], expected[i]);
   }
-  block_cipher_dec(&cfg);
+  assert_int_equal(aes_crypt(AES_MODE_CBC, AES_OP_DECRYPT, AES_KEY_128, key, iv, data, data, sizeof(data)), 0);
   for (int i = 0; i != 16; ++i) {
     assert_int_equal(data[i], i);
     assert_int_equal(data[i + 16], i);
     assert_int_equal(data[i + 32], i);
   }
+}
+
+static void test_aes_unified(void **state) {
+  (void)state;
+
+  static const uint8_t key[32] = {
+      0x60, 0x3d, 0xeb, 0x10, 0x15, 0xca, 0x71, 0xbe, 0x2b, 0x73, 0xae, 0xf0, 0x85, 0x7d, 0x77, 0x81,
+      0x1f, 0x35, 0x2c, 0x07, 0x3b, 0x61, 0x08, 0xd7, 0x2d, 0x98, 0x10, 0xa3, 0x09, 0x14, 0xdf, 0xf4};
+  static const uint8_t iv[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
+  static const uint8_t plaintext[64] = {
+      0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
+      0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51,
+      0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11, 0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef,
+      0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17, 0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10};
+  static const uint8_t ciphertext[64] = {
+      0xf5, 0x8c, 0x4c, 0x04, 0xd6, 0xe5, 0xf1, 0xba, 0x77, 0x9e, 0xab, 0xfb, 0x5f, 0x7b, 0xfb, 0xd6,
+      0x9c, 0xfc, 0x4e, 0x96, 0x7e, 0xdb, 0x80, 0x8d, 0x67, 0x9f, 0x77, 0x7b, 0xc6, 0x70, 0x2c, 0x7d,
+      0x39, 0xf2, 0x33, 0x69, 0xa9, 0xd9, 0xba, 0xcf, 0xa5, 0x30, 0xe2, 0x63, 0x04, 0x23, 0x14, 0x61,
+      0xb2, 0xeb, 0x05, 0xe2, 0xc3, 0x9b, 0xe9, 0xfc, 0xda, 0x6c, 0x19, 0x07, 0x8c, 0x6a, 0x9d, 0x1b};
+  uint8_t buf[sizeof(plaintext)];
+  uint8_t out[sizeof(plaintext)];
+
+  assert_int_equal(aes_crypt(AES_MODE_CBC, AES_OP_ENCRYPT, AES_KEY_256, key, iv, plaintext, buf, sizeof(buf)), 0);
+  assert_memory_equal(buf, ciphertext, sizeof(buf));
+  assert_int_equal(aes_crypt(AES_MODE_CBC, AES_OP_DECRYPT, AES_KEY_256, key, iv, buf, out, sizeof(out)), 0);
+  assert_memory_equal(out, plaintext, sizeof(out));
+
+  assert_int_equal(aes_crypt(AES_MODE_CBC, AES_OP_DECRYPT, AES_KEY_256, key, iv, buf, buf, sizeof(buf)), 0);
+  assert_memory_equal(buf, plaintext, sizeof(buf));
+  assert_int_equal(
+      aes_crypt(AES_MODE_CBC, AES_OP_ENCRYPT, AES_KEY_256, key, iv, plaintext, buf, sizeof(buf) - 1), -1);
+  assert_int_equal(aes_crypt(AES_MODE_CBC, AES_OP_ENCRYPT, AES_KEY_256, key, NULL, plaintext, buf, sizeof(buf)), -1);
+  assert_int_equal(aes_crypt((aes_mode_t)-1, AES_OP_ENCRYPT, AES_KEY_256, key, iv, plaintext, buf, sizeof(buf)), -1);
+  assert_int_equal(aes_crypt(AES_MODE_CBC, (aes_operation_t)-1, AES_KEY_256, key, iv, plaintext, buf, sizeof(buf)),
+                   -1);
+  assert_int_equal(aes_crypt(AES_MODE_CBC, AES_OP_ENCRYPT, (aes_key_size_t)192, key, iv, plaintext, buf, sizeof(buf)),
+                   -1);
+  assert_int_equal(aes_crypt(AES_MODE_ECB, AES_OP_ENCRYPT, AES_KEY_128, NULL, NULL, NULL, NULL, 0), 0);
 }
 
 static void test_aes_cfb(void **state) {
@@ -114,14 +126,14 @@ static void test_aes_cfb(void **state) {
                              .out = data,
                              .key = key,
                              .iv = iv,
-                             .block_size = 16,
+                             .block_size = AES_BLOCK_SIZE,
                              .encrypt = aes128_enc,
                              .decrypt = aes128_dec};
-  block_cipher_enc(&cfg);
+  assert_int_equal(block_cipher_enc(&cfg), 0);
   for (int i = 0; i != 48; ++i) {
     assert_int_equal(data[i], expected[i]);
   }
-  block_cipher_dec(&cfg);
+  assert_int_equal(block_cipher_dec(&cfg), 0);
   for (int i = 0; i != 16; ++i) {
     assert_int_equal(data[i], i);
     assert_int_equal(data[i + 16], i);
@@ -153,14 +165,14 @@ static void test_aes_ofb(void **state) {
                              .out = data,
                              .key = key,
                              .iv = iv,
-                             .block_size = 16,
+                             .block_size = AES_BLOCK_SIZE,
                              .encrypt = aes128_enc,
                              .decrypt = aes128_dec};
-  block_cipher_enc(&cfg);
+  assert_int_equal(block_cipher_enc(&cfg), 0);
   for (int i = 0; i != 48; ++i) {
     assert_int_equal(data[i], expected[i]);
   }
-  block_cipher_dec(&cfg);
+  assert_int_equal(block_cipher_dec(&cfg), 0);
   for (int i = 0; i != 16; ++i) {
     assert_int_equal(data[i], i);
     assert_int_equal(data[i + 16], i);
@@ -187,11 +199,11 @@ static void test_aes_ctr(void **state) {
                              .out = data,
                              .key = key,
                              .iv = iv,
-                             .block_size = 16,
+                             .block_size = AES_BLOCK_SIZE,
                              .encrypt = aes128_enc,
                              .decrypt = aes128_dec};
-  block_cipher_enc(&cfg);
-  block_cipher_dec(&cfg);
+  assert_int_equal(block_cipher_enc(&cfg), 0);
+  assert_int_equal(block_cipher_dec(&cfg), 0);
   for (int i = 0; i != 16; ++i) {
     assert_int_equal(data[i], i);
     assert_int_equal(data[i + 16], i);
@@ -202,6 +214,7 @@ static void test_aes_ctr(void **state) {
 int main() {
   const struct CMUnitTest tests[] = {
       cmocka_unit_test(test_aes_ecb), cmocka_unit_test(test_aes_cbc),
+      cmocka_unit_test(test_aes_unified),
       cmocka_unit_test(test_aes_cfb), cmocka_unit_test(test_aes_ofb),
       cmocka_unit_test(test_aes_ctr),
   };

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <aes.h>
+#include <block-cipher.h>
 #ifdef USE_MBEDCRYPTO
 #include <psa/crypto.h>
 
@@ -74,4 +75,39 @@ __attribute__((weak)) int aes256_dec(const uint8_t *in, uint8_t *out, const uint
   (void)key;
   return 0;
 #endif
+}
+
+__attribute__((weak)) int aes_crypt(aes_mode_t mode, aes_operation_t operation, aes_key_size_t key_size,
+                                    const uint8_t *key, const uint8_t iv[AES_BLOCK_SIZE], const uint8_t *in,
+                                    uint8_t *out, size_t len) {
+  enum BLOCK_CIPHER_MODE block_mode;
+  switch (mode) {
+  case AES_MODE_ECB:
+    block_mode = ECB;
+    break;
+  case AES_MODE_CBC:
+    block_mode = CBC;
+    break;
+  default:
+    return -1;
+  }
+
+  if (operation != AES_OP_ENCRYPT && operation != AES_OP_DECRYPT) return -1;
+  if (key_size != AES_KEY_128 && key_size != AES_KEY_256) return -1;
+  if (len % AES_BLOCK_SIZE != 0) return -1;
+  if (len == 0) return 0;
+  if (in == NULL || out == NULL || key == NULL || (mode == AES_MODE_CBC && iv == NULL)) return -1;
+
+  block_cipher_config cfg = {
+      .mode = block_mode,
+      .in = in,
+      .in_size = len,
+      .out = out,
+      .iv = iv,
+      .key = key,
+      .block_size = AES_BLOCK_SIZE,
+      .encrypt = key_size == AES_KEY_128 ? aes128_enc : aes256_enc,
+      .decrypt = key_size == AES_KEY_128 ? aes128_dec : aes256_dec,
+  };
+  return operation == AES_OP_ENCRYPT ? block_cipher_enc(&cfg) : block_cipher_dec(&cfg);
 }
