@@ -55,6 +55,28 @@ __attribute__((weak)) int aes128_dec(const uint8_t *in, uint8_t *out, const uint
 #endif
 }
 
+__attribute__((weak)) int aes192_enc(const uint8_t *in, uint8_t *out, const uint8_t *key) {
+#ifdef USE_MBEDCRYPTO
+  return aes_ecb(in, out, key, 192, PSA_KEY_USAGE_ENCRYPT);
+#else
+  (void)in;
+  (void)out;
+  (void)key;
+  return 0;
+#endif
+}
+
+__attribute__((weak)) int aes192_dec(const uint8_t *in, uint8_t *out, const uint8_t *key) {
+#ifdef USE_MBEDCRYPTO
+  return aes_ecb(in, out, key, 192, PSA_KEY_USAGE_DECRYPT);
+#else
+  (void)in;
+  (void)out;
+  (void)key;
+  return 0;
+#endif
+}
+
 __attribute__((weak)) int aes256_enc(const uint8_t *in, uint8_t *out, const uint8_t *key) {
 #ifdef USE_MBEDCRYPTO
   return aes_ecb(in, out, key, 256, PSA_KEY_USAGE_ENCRYPT);
@@ -93,10 +115,29 @@ __attribute__((weak)) int aes_crypt(aes_mode_t mode, aes_operation_t operation, 
   }
 
   if (operation != AES_OP_ENCRYPT && operation != AES_OP_DECRYPT) return -1;
-  if (key_size != AES_KEY_128 && key_size != AES_KEY_256) return -1;
+  if (key_size != AES_KEY_128 && key_size != AES_KEY_192 && key_size != AES_KEY_256) return -1;
   if (len % AES_BLOCK_SIZE != 0) return -1;
   if (len == 0) return 0;
   if (in == NULL || out == NULL || key == NULL || (mode == AES_MODE_CBC && iv == NULL)) return -1;
+
+  int (*encrypt)(const uint8_t *in, uint8_t *out, const uint8_t *key);
+  int (*decrypt)(const uint8_t *in, uint8_t *out, const uint8_t *key);
+  switch (key_size) {
+  case AES_KEY_128:
+    encrypt = aes128_enc;
+    decrypt = aes128_dec;
+    break;
+  case AES_KEY_192:
+    encrypt = aes192_enc;
+    decrypt = aes192_dec;
+    break;
+  case AES_KEY_256:
+    encrypt = aes256_enc;
+    decrypt = aes256_dec;
+    break;
+  default:
+    return -1;
+  }
 
   block_cipher_config cfg = {
       .mode = block_mode,
@@ -106,8 +147,8 @@ __attribute__((weak)) int aes_crypt(aes_mode_t mode, aes_operation_t operation, 
       .iv = iv,
       .key = key,
       .block_size = AES_BLOCK_SIZE,
-      .encrypt = key_size == AES_KEY_128 ? aes128_enc : aes256_enc,
-      .decrypt = key_size == AES_KEY_128 ? aes128_dec : aes256_dec,
+      .encrypt = encrypt,
+      .decrypt = decrypt,
   };
   return operation == AES_OP_ENCRYPT ? block_cipher_enc(&cfg) : block_cipher_dec(&cfg);
 }

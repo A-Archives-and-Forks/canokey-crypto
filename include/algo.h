@@ -20,6 +20,7 @@ typedef enum {
   TDEA,
   AES128,
   AES256,
+  AES192,
 } key_type_t;
 
 extern const size_t PRIVATE_KEY_LENGTH[KEY_TYPE_PKC_END];
