@@ -73,6 +73,17 @@ int ecc_sign(key_type_t type, const ecc_key_t *key, const uint8_t *data_or_diges
 size_t ecdsa_sig2ansi(uint8_t key_len, const uint8_t *input, uint8_t *output);
 
 /**
+ * Sign a SHA-256 digest with a P-256 key and encode the signature as DER.
+ *
+ * @param key     P-256 signing key
+ * @param digest  32-byte SHA-256 digest
+ * @param sig     DER-encoded ECDSA signature output (at least 72 bytes)
+ *
+ * @return DER signature length, or 0 on error
+ */
+size_t ecdsa_p256_sign_der(const ecc_key_t *key, const uint8_t digest[32], uint8_t sig[72]);
+
+/**
  * Compute Z specified by SM2
  *
  * @param id    User's ID. The first byte contains the length and followed by the ID.

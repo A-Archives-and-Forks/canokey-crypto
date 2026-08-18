@@ -342,7 +342,8 @@ int ecdh(key_type_t type, const uint8_t *priv_key, const uint8_t *receiver_pub_k
     swap_big_number_endian(out);
 
     uint8_t nonzero = 0;
-    for (size_t i = 0; i < sizeof(K__x25519_key); ++i) nonzero |= out[i];
+    for (size_t i = 0; i < sizeof(K__x25519_key); ++i)
+      nonzero |= out[i];
 
     // RFC 7748 permits rejecting the all-zero result to detect low-order public inputs.
     return nonzero == 0 ? -1 : 0;
@@ -393,6 +394,11 @@ size_t ecdsa_sig2ansi(uint8_t key_len, const uint8_t *input, uint8_t *output) {
   output[part2_tag_off + 1] = part2_len;
   if (part2_len == key_len + 1) output[part2_tag_off + 2] = 0;
   return seq_header_len + content_len;
+}
+
+size_t ecdsa_p256_sign_der(const ecc_key_t *key, const uint8_t digest[32], uint8_t sig[72]) {
+  if (ecc_sign(SECP256R1, key, digest, 32, sig) < 0) return 0;
+  return ecdsa_sig2ansi(32, sig, sig);
 }
 
 __attribute__((weak)) int sm2_z(const uint8_t *id, const ecc_key_t *key, uint8_t *z) {
