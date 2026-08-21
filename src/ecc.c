@@ -303,6 +303,27 @@ int ecc_sign(key_type_t type, const ecc_key_t *key, const uint8_t *data_or_diges
   }
 }
 
+int ed25519_randomized_sign_init(ed25519_randomized_sign_state_t *state, const ecc_key_t *key) {
+  if (state == NULL || key == NULL) return -1;
+  return K__ed25519_randomized_sign_init(state, key->pri, key->pub);
+}
+
+int ed25519_randomized_sign_update(ed25519_randomized_sign_state_t *state, const uint8_t *data, size_t len) {
+  return K__ed25519_randomized_sign_update(state, data, len);
+}
+
+int ed25519_randomized_sign_final(ed25519_randomized_sign_state_t *state, uint8_t sig[64]) {
+  return K__ed25519_randomized_sign_final(state, sig);
+}
+
+void ed25519_randomized_sign_clear(ed25519_randomized_sign_state_t *state) {
+  if (state == NULL) return;
+#ifdef USE_MBEDCRYPTO
+  if (state->active) psa_hash_abort(&state->hash.op);
+#endif
+  memzero(state, sizeof(*state));
+}
+
 int ecc_verify_private_key(key_type_t type, ecc_key_t *key) {
   if (!IS_ECC(type)) return -1;
 
@@ -725,6 +746,123 @@ __attribute__((weak)) void K__ed25519_sign(const unsigned char *m, size_t mlen, 
   (void)sk;
   (void)pk;
   (void)rs;
+#endif
+}
+
+__attribute__((weak)) int K__ed25519_randomized_sign_init(ed25519_randomized_sign_state_t *state,
+                                                           const K__ed25519_secret_key sk,
+                                                           const K__ed25519_public_key pk) {
+#ifdef USE_MBEDCRYPTO
+  static const uint8_t domain[] = "CanoKey Ed25519 randomized nonce v1";
+  uint8_t digest[SHA512_DIGEST_LENGTH];
+  uint8_t prefix[32];
+  uint8_t random[SHA512_DIGEST_LENGTH];
+  mbedtls_ecp_group ed25519;
+  mbedtls_ecp_point point;
+  mbedtls_mpi nonce;
+  int ret = -1;
+
+  if (state == NULL || sk == NULL || pk == NULL) return -1;
+  memzero(state, sizeof(*state));
+  sha512_raw(sk, sizeof(K__ed25519_secret_key), digest);
+  digest[0] &= 248;
+  digest[31] &= 127;
+  digest[31] |= 64;
+  memcpy(state->scalar, digest, sizeof(state->scalar));
+  memcpy(prefix, digest + 32, sizeof(prefix));
+
+  mbedtls_ecp_group_init(&ed25519);
+  mbedtls_ecp_point_init(&point);
+  mbedtls_mpi_init(&nonce);
+  if (mbedtls_ecp_group_load(&ed25519, MBEDTLS_ECP_DP_ED25519) != 0) goto cleanup;
+  do {
+    random_buffer(random, sizeof(random));
+    sha512_init(&state->hash);
+    sha512_update(&state->hash, domain, sizeof(domain) - 1);
+    sha512_update(&state->hash, prefix, sizeof(prefix));
+    sha512_update(&state->hash, pk, sizeof(K__ed25519_public_key));
+    sha512_update(&state->hash, random, sizeof(random));
+    sha512_final(&state->hash, digest);
+    if (mbedtls_mpi_read_binary_le(&nonce, digest, sizeof(digest)) != 0 ||
+        mbedtls_mpi_mod_mpi(&nonce, &nonce, &ed25519.N) != 0)
+      goto cleanup;
+  } while (mbedtls_mpi_cmp_int(&nonce, 0) == 0);
+  if (mbedtls_mpi_write_binary_le(&nonce, state->nonce, sizeof(state->nonce)) != 0 ||
+      mbedtls_ecp_mul(&ed25519, &point, &nonce, &ed25519.G, mbedtls_rnd, NULL) != 0 ||
+      mbedtls_mpi_write_binary_le(&point.Y, state->encoded_r, sizeof(state->encoded_r)) != 0)
+    goto cleanup;
+  if (mbedtls_mpi_get_bit(&point.X, 0)) state->encoded_r[31] |= 0x80;
+
+  sha512_init(&state->hash);
+  sha512_update(&state->hash, state->encoded_r, sizeof(state->encoded_r));
+  sha512_update(&state->hash, pk, sizeof(K__ed25519_public_key));
+  state->active = 1;
+  ret = 0;
+
+cleanup:
+  mbedtls_mpi_free(&nonce);
+  mbedtls_ecp_point_free(&point);
+  mbedtls_ecp_group_free(&ed25519);
+  memzero(digest, sizeof(digest));
+  memzero(prefix, sizeof(prefix));
+  memzero(random, sizeof(random));
+  if (ret != 0) memzero(state, sizeof(*state));
+  return ret;
+#else
+  (void)state;
+  (void)sk;
+  (void)pk;
+  return -1;
+#endif
+}
+
+__attribute__((weak)) int K__ed25519_randomized_sign_update(ed25519_randomized_sign_state_t *state,
+                                                             const uint8_t *data, size_t len) {
+  if (state == NULL || !state->active || (data == NULL && len != 0)) return -1;
+  sha512_update(&state->hash, data, len);
+  return 0;
+}
+
+__attribute__((weak)) int K__ed25519_randomized_sign_final(ed25519_randomized_sign_state_t *state,
+                                                            K__ed25519_signature sig) {
+#ifdef USE_MBEDCRYPTO
+  uint8_t digest[SHA512_DIGEST_LENGTH];
+  mbedtls_ecp_group ed25519;
+  mbedtls_mpi nonce, challenge, scalar;
+  int ret = -1;
+
+  if (state == NULL || sig == NULL || !state->active) return -1;
+  sha512_final(&state->hash, digest);
+  mbedtls_ecp_group_init(&ed25519);
+  mbedtls_mpi_init(&nonce);
+  mbedtls_mpi_init(&challenge);
+  mbedtls_mpi_init(&scalar);
+  if (mbedtls_ecp_group_load(&ed25519, MBEDTLS_ECP_DP_ED25519) != 0 ||
+      mbedtls_mpi_read_binary_le(&nonce, state->nonce, sizeof(state->nonce)) != 0 ||
+      mbedtls_mpi_read_binary_le(&challenge, digest, sizeof(digest)) != 0 ||
+      mbedtls_mpi_mod_mpi(&challenge, &challenge, &ed25519.N) != 0 ||
+      mbedtls_mpi_read_binary_le(&scalar, state->scalar, sizeof(state->scalar)) != 0 ||
+      mbedtls_mpi_mul_mpi(&challenge, &challenge, &scalar) != 0 ||
+      mbedtls_mpi_add_mpi(&challenge, &challenge, &nonce) != 0 ||
+      mbedtls_mpi_mod_mpi(&challenge, &challenge, &ed25519.N) != 0)
+    goto cleanup;
+
+  memcpy(sig, state->encoded_r, sizeof(state->encoded_r));
+  if (mbedtls_mpi_write_binary_le(&challenge, sig + 32, 32) != 0) goto cleanup;
+  ret = 0;
+
+cleanup:
+  mbedtls_mpi_free(&scalar);
+  mbedtls_mpi_free(&challenge);
+  mbedtls_mpi_free(&nonce);
+  mbedtls_ecp_group_free(&ed25519);
+  memzero(digest, sizeof(digest));
+  memzero(state, sizeof(*state));
+  return ret;
+#else
+  (void)state;
+  (void)sig;
+  return -1;
 #endif
 }
 

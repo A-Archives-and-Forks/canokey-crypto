@@ -47,6 +47,11 @@
                          + MLDSA_OMEGA + MLDSA_K)
 /* 48 + 5*640 + 55 + 6 = 3309 bytes */
 
+typedef struct {
+  uint8_t seed[MLDSA_SEEDBYTES];
+  uint8_t tr[MLDSA_TRBYTES];
+} mldsa65_private_key_t;
+
 /**
  * ML-DSA-65 signing (FIPS 204, Algorithm 7 – ML-DSA.Sign).
  *
@@ -80,6 +85,10 @@ int ml_dsa_65_sign(uint8_t *sig, size_t *sig_len,
  */
 int ml_dsa_65_keygen(uint8_t *pk, uint8_t *sk, uint8_t *tr,
                      const uint8_t *seed);
+
+/** Compute tr = H(pk) directly from a 32-byte ML-DSA-65 seed. */
+int ml_dsa_65_seed_to_tr(uint8_t tr[MLDSA_TRBYTES],
+                         const uint8_t seed[MLDSA_SEEDBYTES]);
 
 /**
  * ML-DSA-65 signing from seed (no sk buffer needed).
@@ -152,6 +161,12 @@ int ml_dsa_65_sign_seed_streaming(
     const uint8_t *ctx, size_t ctx_len,
     const uint8_t *tr);
 
+/* Streaming sign from seed using a precomputed FIPS 204 mu value. */
+int ml_dsa_65_sign_seed_mu_streaming(
+    uint8_t *out, size_t out_size,
+    mldsa_sign_state_t *state,
+    const uint8_t mu[MLDSA_CRHBYTES]);
+
 /* State for streaming keygen (pk export). */
 typedef struct {
   uint8_t phase;
@@ -159,6 +174,9 @@ typedef struct {
 } mldsa_keygen_state_t;
 
 /* Streaming keygen (pk export from seed).
+ *
+ * If out is NULL, tr_out must be non-NULL and phase must be 0. In that mode,
+ * only tr is generated and the operation completes in one call.
  *
  * phase 0: outputs rho(32) + t1[0..3](1280) = 1312 bytes.
  *          If tr_out != NULL, computes tr = H(pk) by hashing all 6 rows

@@ -6,6 +6,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
 
 option(USE_MBEDCRYPTO "Use mbed-crypto as the crypto implementation" ON)
 option(TEST_WITH_MBEDCRYPTO "Enable cross-validation tests against mbedtls" ON)
+option(USE_PLATFORM_KECCAK_P1600 "Use a platform-provided Keccak-p1600 implementation" OFF)
 
 if(USE_MBEDCRYPTO OR (ENABLE_CRYPTO_TESTS AND TEST_WITH_MBEDCRYPTO))
     set(USE_STATIC_TF_PSA_CRYPTO_LIBRARY ON CACHE BOOL "")
@@ -24,6 +25,9 @@ if(USE_MBEDCRYPTO OR (ENABLE_CRYPTO_TESTS AND TEST_WITH_MBEDCRYPTO))
 endif()
 
 file(GLOB SRC src/*.c)
+if(USE_PLATFORM_KECCAK_P1600)
+    list(FILTER SRC EXCLUDE REGEX "/keccak_p1600\\.c$")
+endif()
 add_library(canokey-crypto STATIC ${SRC})
 if(USE_MBEDCRYPTO)
     target_compile_definitions(canokey-crypto PUBLIC USE_MBEDCRYPTO)

@@ -19,23 +19,33 @@ static const uint8_t encaps_seed[MLKEM768_ENCAPS_SEED_BYTES] = {
     0xf0, 0x6b, 0x37, 0x95, 0x22, 0xce, 0x48, 0x7f, 0xa9, 0x14, 0xd3, 0x5e, 0x80, 0xbb, 0x06, 0x71,
 };
 
+static int read_key(void *ctx, size_t offset, uint8_t *buf, size_t len) {
+  if (offset > MLKEM768_SECRET_KEY_BYTES || len > MLKEM768_SECRET_KEY_BYTES - offset) return -1;
+  memcpy(buf, (const uint8_t *)ctx + offset, len);
+  return (int)len;
+}
+
 static void test_ml_kem_768_roundtrip(void **state) {
   (void)state;
 
   static uint8_t ek[MLKEM768_PUBLIC_KEY_BYTES];
   static uint8_t dk[MLKEM768_SECRET_KEY_BYTES];
   static uint8_t ek_repeat[MLKEM768_PUBLIC_KEY_BYTES];
+  static uint8_t ek_seed[MLKEM768_PUBLIC_KEY_BYTES];
   static uint8_t dk_repeat[MLKEM768_SECRET_KEY_BYTES];
   static uint8_t ct[MLKEM768_CIPHERTEXT_BYTES];
   static uint8_t ct_repeat[MLKEM768_CIPHERTEXT_BYTES];
   uint8_t ss_enc[MLKEM768_SHARED_KEY_BYTES];
   uint8_t ss_dec[MLKEM768_SHARED_KEY_BYTES];
   uint8_t ss_repeat[MLKEM768_SHARED_KEY_BYTES];
+  uint8_t ss_seed[MLKEM768_SHARED_KEY_BYTES];
 
   assert_int_equal(ml_kem_768_keygen(ek, dk, keygen_seed), 0);
   assert_int_equal(ml_kem_768_keygen(ek_repeat, dk_repeat, keygen_seed), 0);
   assert_memory_equal(ek, ek_repeat, sizeof(ek));
   assert_memory_equal(dk, dk_repeat, sizeof(dk));
+  assert_int_equal(ml_kem_768_seed_to_public(ek_seed, keygen_seed), 0);
+  assert_memory_equal(ek, ek_seed, sizeof(ek));
 
   assert_int_equal(ml_kem_768_encaps(ct, ss_enc, ek, encaps_seed), 0);
   assert_int_equal(ml_kem_768_encaps(ct_repeat, ss_repeat, ek, encaps_seed), 0);
@@ -45,9 +55,18 @@ static void test_ml_kem_768_roundtrip(void **state) {
   assert_int_equal(ml_kem_768_decaps(ss_dec, ct, dk), 0);
   assert_memory_equal(ss_enc, ss_dec, sizeof(ss_enc));
 
+  assert_int_equal(ml_kem_768_decaps_key_from_source(ss_dec, ct, read_key, dk), 0);
+  assert_memory_equal(ss_enc, ss_dec, sizeof(ss_enc));
+
+  assert_int_equal(ml_kem_768_decaps_seed(ss_seed, ct, keygen_seed, ek_seed), 0);
+  assert_memory_equal(ss_enc, ss_seed, sizeof(ss_enc));
+  assert_memory_equal(ek, ek_seed, sizeof(ek));
+
   ct[0] ^= 0x01;
   assert_int_equal(ml_kem_768_decaps(ss_dec, ct, dk), 0);
   assert_int_not_equal(memcmp(ss_enc, ss_dec, sizeof(ss_enc)), 0);
+  assert_int_equal(ml_kem_768_decaps_seed(ss_seed, ct, keygen_seed, ek_seed), 0);
+  assert_memory_equal(ss_dec, ss_seed, sizeof(ss_dec));
 }
 
 static void test_ml_kem_768_bad_args(void **state) {
@@ -66,6 +85,12 @@ static void test_ml_kem_768_bad_args(void **state) {
   assert_int_equal(ml_kem_768_decaps(NULL, ct, dk), -1);
   assert_int_equal(ml_kem_768_decaps(ss, NULL, dk), -1);
   assert_int_equal(ml_kem_768_decaps(ss, ct, NULL), -1);
+  assert_int_equal(ml_kem_768_seed_to_public(NULL, keygen_seed), -1);
+  assert_int_equal(ml_kem_768_seed_to_public(ek, NULL), -1);
+  assert_int_equal(ml_kem_768_decaps_seed(NULL, ct, keygen_seed, ek), -1);
+  assert_int_equal(ml_kem_768_decaps_seed(ss, NULL, keygen_seed, ek), -1);
+  assert_int_equal(ml_kem_768_decaps_seed(ss, ct, NULL, ek), -1);
+  assert_int_equal(ml_kem_768_decaps_seed(ss, ct, keygen_seed, NULL), -1);
 }
 
 int main(void) {

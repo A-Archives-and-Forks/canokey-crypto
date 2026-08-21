@@ -38,22 +38,26 @@ int ml_kem_768_encaps(uint8_t *ct, uint8_t ss[MLKEM768_SHARED_KEY_BYTES], const 
 
 int ml_kem_768_decaps(uint8_t ss[MLKEM768_SHARED_KEY_BYTES], const uint8_t *ct, const uint8_t *dk);
 
-/*
- * Decapsulation with ciphertext loaded from a caller-supplied read callback.
- * Implementations may copy ciphertext into bounded internal scratch before
- * touching crypto/PKE state; callers must not rely on the source after return.
- */
-int ml_kem_768_decaps_from_source(uint8_t ss[MLKEM768_SHARED_KEY_BYTES],
-                                  int (*read)(void *ctx, size_t offset, uint8_t *buf, size_t len), void *ctx,
-                                  const uint8_t *dk);
+/* Derive the encapsulation key without materializing the decapsulation key. */
+int ml_kem_768_seed_to_public(uint8_t ek[MLKEM768_PUBLIC_KEY_BYTES],
+                              const uint8_t seed[MLKEM768_KEYGEN_SEED_BYTES]);
 
 /*
- * Decapsulation with both ciphertext and decapsulation key loaded from bounded
- * callbacks. This lets platform backends keep large temporaries in their own
- * crypto scratch domain instead of forcing applets to materialize them.
+ * Decapsulate directly from the 64-byte key-generation seed. ek_scratch is
+ * caller-owned transient storage and is overwritten with the derived public
+ * key; no expanded decapsulation key is materialized.
+ */
+int ml_kem_768_decaps_seed(uint8_t ss[MLKEM768_SHARED_KEY_BYTES],
+                           const uint8_t ct[MLKEM768_CIPHERTEXT_BYTES],
+                           const uint8_t seed[MLKEM768_KEYGEN_SEED_BYTES],
+                           uint8_t ek_scratch[MLKEM768_PUBLIC_KEY_BYTES]);
+
+/*
+ * Decapsulation with an in-memory ciphertext and a decapsulation key loaded
+ * from a bounded callback. read_dk must return len on success.
  */
 int ml_kem_768_decaps_key_from_source(uint8_t ss[MLKEM768_SHARED_KEY_BYTES],
-                                      int (*read_ct)(void *ctx, size_t offset, uint8_t *buf, size_t len), void *ct_ctx,
+                                      const uint8_t ct[MLKEM768_CIPHERTEXT_BYTES],
                                       int (*read_dk)(void *ctx, size_t offset, uint8_t *buf, size_t len), void *dk_ctx);
 
 #endif /* _ML_KEM_768_H_ */

@@ -86,6 +86,13 @@ static int mldsa65_sign_with_sk(uint8_t *sig, size_t *sig_len, const uint8_t *ms
   return canokey_crypto_mldsa65_signature_internal(sig, sig_len, msg, msg_len, prefix, prefix_len, rnd, sk, 0);
 }
 
+static int mldsa65_sign_mu_with_sk(uint8_t *sig, size_t *sig_len, const uint8_t mu[CANOKEY_MLDSA65_TR_BYTES],
+                                   const uint8_t *sk) {
+  const uint8_t rnd[CANOKEY_MLDSA65_SEED_BYTES] = {0};
+  if (sig == NULL || sig_len == NULL || mu == NULL || sk == NULL) return -1;
+  return canokey_crypto_mldsa65_signature_internal(sig, sig_len, mu, CANOKEY_MLDSA65_TR_BYTES, NULL, 0, rnd, sk, 1);
+}
+
 static int mldsa65_keypair_from_seed(uint8_t *pk, uint8_t *sk, const uint8_t *seed) {
   if (pk == NULL || sk == NULL || seed == NULL) return -1;
   return canokey_crypto_mldsa65_keypair_internal(pk, sk, seed);
@@ -188,6 +195,11 @@ __attribute__((weak)) int ml_dsa_65_keygen(uint8_t *pk, uint8_t *sk, uint8_t *tr
 #endif
 }
 
+__attribute__((weak)) int ml_dsa_65_seed_to_tr(uint8_t *tr, const uint8_t *seed) {
+  if (tr == NULL || seed == NULL) return -1;
+  return ml_dsa_65_keygen(NULL, NULL, tr, seed);
+}
+
 __attribute__((weak)) int ml_dsa_65_sign_seed(uint8_t *sig, size_t *sig_len, const uint8_t *msg, size_t msg_len,
                                               const uint8_t *ctx, size_t ctx_len, const uint8_t *seed,
                                               const uint8_t *tr) {
@@ -229,9 +241,9 @@ __attribute__((weak)) int ml_dsa_65_sign_seed(uint8_t *sig, size_t *sig_len, con
 #endif
 }
 
-__attribute__((weak)) int ml_dsa_65_sign_seed_streaming(uint8_t *out, size_t out_size, mldsa_sign_state_t *state,
-                                                        const uint8_t *msg, size_t msg_len, const uint8_t *ctx,
-                                                        size_t ctx_len, const uint8_t *tr) {
+static int mldsa65_sign_seed_streaming_common(uint8_t *out, size_t out_size, mldsa_sign_state_t *state,
+                                              const uint8_t *msg, size_t msg_len, const uint8_t *ctx, size_t ctx_len,
+                                              const uint8_t *tr, const uint8_t *mu) {
 #ifdef USE_MBEDCRYPTO
   const uint8_t *chunk;
   size_t chunk_len;
@@ -241,14 +253,29 @@ __attribute__((weak)) int ml_dsa_65_sign_seed_streaming(uint8_t *out, size_t out
   if (out == NULL || state == NULL) return -1;
 
   if (state->phase == 0) {
-    if (out_size < CANOKEY_MLDSA65_C_TILDE_BYTES || tr == NULL) return -1;
+    if (out_size < CANOKEY_MLDSA65_C_TILDE_BYTES || (mu == NULL && tr == NULL)) return -1;
 
     slot = mldsa65_stream_cache_acquire(state);
     if (slot == NULL) return -1;
 
     if (slot->owner == state) mldsa65_stream_cache_release(slot);
 
-    ret = ml_dsa_65_sign_seed(slot->sig, &slot->sig_len, msg, msg_len, ctx, ctx_len, state->seed, tr);
+    if (mu == NULL) {
+      ret = ml_dsa_65_sign_seed(slot->sig, &slot->sig_len, msg, msg_len, ctx, ctx_len, state->seed, tr);
+    } else {
+      uint8_t *pk_buf = mbedtls_calloc(1, CANOKEY_MLDSA65_PK_BYTES);
+      uint8_t *sk_buf = mbedtls_calloc(1, CANOKEY_MLDSA65_SK_BYTES);
+      if (pk_buf == NULL || sk_buf == NULL) {
+        mbedtls_free(pk_buf);
+        mldsa65_secure_free(sk_buf, CANOKEY_MLDSA65_SK_BYTES);
+        mldsa65_stream_cache_release(slot);
+        return -1;
+      }
+      ret = mldsa65_keypair_from_seed(pk_buf, sk_buf, state->seed);
+      if (ret == 0) ret = mldsa65_sign_mu_with_sk(slot->sig, &slot->sig_len, mu, sk_buf);
+      mbedtls_free(pk_buf);
+      mldsa65_secure_free(sk_buf, CANOKEY_MLDSA65_SK_BYTES);
+    }
     if (ret != 0) {
       mldsa65_stream_cache_release(slot);
       return ret;
@@ -299,8 +326,21 @@ __attribute__((weak)) int ml_dsa_65_sign_seed_streaming(uint8_t *out, size_t out
   (void)ctx;
   (void)ctx_len;
   (void)tr;
+  (void)mu;
   return -1;
 #endif
+}
+
+__attribute__((weak)) int ml_dsa_65_sign_seed_streaming(uint8_t *out, size_t out_size, mldsa_sign_state_t *state,
+                                                        const uint8_t *msg, size_t msg_len, const uint8_t *ctx,
+                                                        size_t ctx_len, const uint8_t *tr) {
+  return mldsa65_sign_seed_streaming_common(out, out_size, state, msg, msg_len, ctx, ctx_len, tr, NULL);
+}
+
+__attribute__((weak)) int ml_dsa_65_sign_seed_mu_streaming(uint8_t *out, size_t out_size, mldsa_sign_state_t *state,
+                                                           const uint8_t *mu) {
+  if (state != NULL && state->phase == 0 && mu == NULL) return -1;
+  return mldsa65_sign_seed_streaming_common(out, out_size, state, NULL, 0, NULL, 0, NULL, mu);
 }
 
 __attribute__((weak)) int ml_dsa_65_keygen_streaming(uint8_t *out, size_t out_size, mldsa_keygen_state_t *state,
@@ -310,10 +350,13 @@ __attribute__((weak)) int ml_dsa_65_keygen_streaming(uint8_t *out, size_t out_si
   uint8_t *sk_buf;
   int ret;
 
-  if (out == NULL || state == NULL) return -1;
+  if (state == NULL) return -1;
+
+  const int tr_only = out == NULL && tr_out != NULL && state->phase == 0;
+  if (out == NULL && !tr_only) return -1;
 
   if (state->phase == 0) {
-    if (out_size < CANOKEY_MLDSA65_SEED_BYTES + 4 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES) return -1;
+    if (!tr_only && out_size < CANOKEY_MLDSA65_SEED_BYTES + 4 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES) return -1;
   } else if (state->phase == 1) {
     if (out_size < 2 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES) return -1;
   } else {
@@ -331,10 +374,15 @@ __attribute__((weak)) int ml_dsa_65_keygen_streaming(uint8_t *out, size_t out_si
   ret = mldsa65_keypair_from_seed(pk_buf, sk_buf, state->seed);
   if (ret == 0) {
     if (state->phase == 0) {
-      memcpy(out, pk_buf, CANOKEY_MLDSA65_SEED_BYTES + 4 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES);
       if (tr_out != NULL) memcpy(tr_out, sk_buf + MLDSA65_TR_OFFSET, CANOKEY_MLDSA65_TR_BYTES);
-      state->phase = 1;
-      ret = CANOKEY_MLDSA65_SEED_BYTES + 4 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES;
+      if (tr_only) {
+        state->phase = 0;
+        ret = 1;
+      } else {
+        memcpy(out, pk_buf, CANOKEY_MLDSA65_SEED_BYTES + 4 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES);
+        state->phase = 1;
+        ret = CANOKEY_MLDSA65_SEED_BYTES + 4 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES;
+      }
     } else {
       memcpy(out, pk_buf + CANOKEY_MLDSA65_SEED_BYTES + 4 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES,
              2 * CANOKEY_MLDSA65_POLYT1_PACKED_BYTES);

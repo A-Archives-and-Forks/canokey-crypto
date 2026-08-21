@@ -3,6 +3,7 @@
 #define CANOKEY_CRYPTO_ECC_H
 
 #include <algo.h>
+#include <sha.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -168,6 +169,14 @@ typedef unsigned char K__ed25519_public_key[32];
 typedef unsigned char K__ed25519_secret_key[32];
 typedef unsigned char K__x25519_key[32];
 
+typedef struct {
+  sha512_ctx_t hash;
+  uint8_t scalar[32];
+  uint8_t nonce[32];
+  uint8_t encoded_r[32];
+  uint8_t active;
+} ed25519_randomized_sign_state_t;
+
 /**
  * Calculate public key from private key
  *
@@ -187,6 +196,23 @@ void K__ed25519_publickey(const K__ed25519_secret_key sk, K__ed25519_public_key 
  */
 void K__ed25519_sign(const unsigned char *m, size_t mlen, const K__ed25519_secret_key sk,
                      const K__ed25519_public_key pk, K__ed25519_signature rs);
+
+/**
+ * Start an Ed25519 signature using a device-generated random nonce.
+ *
+ * This variant accepts the message incrementally. It produces an ordinary
+ * Ed25519 signature, but unlike RFC 8032 deterministic signing, repeated
+ * signatures of the same message differ and security depends on the RNG.
+ */
+int ed25519_randomized_sign_init(ed25519_randomized_sign_state_t *state, const ecc_key_t *key);
+int ed25519_randomized_sign_update(ed25519_randomized_sign_state_t *state, const uint8_t *data, size_t len);
+int ed25519_randomized_sign_final(ed25519_randomized_sign_state_t *state, uint8_t sig[64]);
+void ed25519_randomized_sign_clear(ed25519_randomized_sign_state_t *state);
+
+int K__ed25519_randomized_sign_init(ed25519_randomized_sign_state_t *state, const K__ed25519_secret_key sk,
+                                    const K__ed25519_public_key pk);
+int K__ed25519_randomized_sign_update(ed25519_randomized_sign_state_t *state, const uint8_t *data, size_t len);
+int K__ed25519_randomized_sign_final(ed25519_randomized_sign_state_t *state, K__ed25519_signature sig);
 
 /**
  * Calculate shared_secret = private_key * public_key, the second step of X25519
